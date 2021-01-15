@@ -448,6 +448,7 @@ pub fn prepare_contract<C: ImportSatisfyCheck, T: Config>(
 		maximum: memory_limits.1,
 		_reserved: None,
 		code: contract_module.into_wasm_code()?,
+		refcount: 1,
 	})
 }
 

@@ -30,42 +30,48 @@
 use crate::wasm::{prepare, runtime::Env, PrefabWasmModule};
 use crate::{CodeHash, CodeStorage, PristineCode, Schedule, Config};
 use sp_std::prelude::*;
-use sp_runtime::traits::Hash;
 use sp_core::crypto::UncheckedFrom;
 use frame_support::StorageMap;
 
-/// Put code in the storage. The hash of code is used as a key and is returned
-/// as a result of this function.
+/// Put the instrumented module in storage.
 ///
-/// This function instruments the given code and caches it in the storage.
-pub fn save<T: Config>(
+/// Increments the refcount of the in-storage `prefab_module` if it already exists in storage
+/// under the specified `code_hash`.
+pub fn store<T: Config>(
+	prefab_module: PrefabWasmModule,
 	original_code: Vec<u8>,
-	schedule: &Schedule<T>,
-) -> Result<CodeHash<T>, &'static str> where T::AccountId: UncheckedFrom<T::Hash> + AsRef<[u8]> {
-	let prefab_module = prepare::prepare_contract::<Env, T>(&original_code, schedule)?;
-	let code_hash = T::Hashing::hash(&original_code);
-
-	<CodeStorage<T>>::insert(code_hash, prefab_module);
+	code_hash: &CodeHash<T>,
+) where T::AccountId: UncheckedFrom<T::Hash> + AsRef<[u8]> {
 	<PristineCode<T>>::insert(code_hash, original_code);
-
-	Ok(code_hash)
+	<CodeStorage<T>>::mutate(code_hash, |existing| {
+		match existing {
+			// TODO: verify this statement
+			// When hitting this overflow we would already have paniced because
+			// of storage exhaustion.
+			Some(module) => module.refcount += 1,
+			None => *existing = Some(prefab_module),
+		}
+	});
 }
 
-/// Version of `save` to be used in runtime benchmarks.
+/// Prepare and save the code to storage in one go.
 //
 /// This version neither checks nor instruments the passed in code. This is useful
 /// when code needs to be benchmarked without the injected instrumentation.
+///
+/// # Note
+///
+/// In production code the preparation and storage are seperate steps because
+/// we only want to store in case of a successful instantiation. For benchmarks we can
+/// disregard this error case.
 #[cfg(feature = "runtime-benchmarks")]
-pub fn save_raw<T: Config>(
+pub fn prepare_and_store_unchecked<T: Config>(
 	original_code: Vec<u8>,
 	schedule: &Schedule<T>,
 ) -> Result<CodeHash<T>, &'static str> where T::AccountId: UncheckedFrom<T::Hash> + AsRef<[u8]> {
 	let prefab_module = prepare::benchmarking::prepare_contract::<T>(&original_code, schedule)?;
 	let code_hash = T::Hashing::hash(&original_code);
-
-	<CodeStorage<T>>::insert(code_hash, prefab_module);
-	<PristineCode<T>>::insert(code_hash, original_code);
-
+	store(prefab_module, &code_hash);
 	Ok(code_hash)
 }
 

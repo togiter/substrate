@@ -37,10 +37,13 @@ mod runtime;
 use self::code_cache::load as load_code;
 use pallet_contracts_primitives::ExecResult;
 
-pub use self::code_cache::save as save_code;
+pub use self::{
+	code_cache::store as store_code,
+	prepare::prepare_contract,
+	runtime::{ReturnCode, Runtime, RuntimeToken},
+};
 #[cfg(feature = "runtime-benchmarks")]
-pub use self::code_cache::save_raw as save_code_raw;
-pub use self::runtime::{ReturnCode, Runtime, RuntimeToken};
+pub use self::code_cache::prepare_and_store_unchecked as prepare_and_store_unchecked_code;
 
 /// A prepared wasm module ready for execution.
 #[derive(Clone, Encode, Decode)]
@@ -59,6 +62,10 @@ pub struct PrefabWasmModule {
 	_reserved: Option<()>,
 	/// Code instrumented with the latest schedule.
 	code: Vec<u8>,
+	/// The number of alive contracts that use this as their contract code.
+	///
+	/// If this number drops to zero this module is removed from storage.
+	refcount: u32,
 }
 
 /// Wasm executable loaded by `WasmLoader` and executed by `WasmVm`.
