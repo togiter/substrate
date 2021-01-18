@@ -108,12 +108,27 @@ where
 			schedule: self.schedule,
 		})
 	}
+	fn get_init(&self, module: PrefabWasmModule) -> Self::Executable {
+		WasmExecutable {
+			entrypoint_name: "init",
+			prefab_module: module,
+			schedule: self.schedule,
+		}
+	}
+}
+
+impl<'a, T: Config> From<WasmExecutable<'a, T>> for PrefabWasmModule {
+	fn from(from: WasmExecutable<'a, T>) -> Self {
+		from.prefab_module
+	}
 }
 
 impl<'a, T: Config> crate::exec::Executable<T> for WasmExecutable<'a, T>
 where
 	T::AccountId: UncheckedFrom<T::Hash> + AsRef<[u8]>
 {
+	type Module = PrefabWasmModule;
+
 	fn execute<E: Ext<T = T>>(
 		&self,
 		mut ext: E,

@@ -181,6 +181,8 @@ pub trait Loader<T: Config> {
 	/// Load the main portion of the code specified by the `code_hash`. This executable
 	/// is called for each call to a contract.
 	fn load_main(&self, code_hash: &CodeHash<T>) -> Result<Self::Executable, &'static str>;
+
+	fn get_init(&self, module: <Self::Executable as Executable<T>>::Module) -> Self::Executable;
 }
 
 /// A trait that represent a virtual machine.
@@ -191,7 +193,9 @@ pub trait Loader<T: Config> {
 ///
 /// Execution of code can end by either implicit termination (that is, reached the end of
 /// executable), explicit termination via returning a buffer or termination due to a trap.
-pub trait Executable<T: Config> {
+pub trait Executable<T: Config>: Sized {
+	type Module: From<Self>;
+
 	fn execute<E: Ext<T = T>>(
 		&self,
 		ext: E,
