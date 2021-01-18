@@ -120,12 +120,6 @@ where
 	}
 }
 
-impl<'a, T: Config> From<WasmExecutable<'a, T>> for PrefabWasmModule<T> {
-	fn from(from: WasmExecutable<'a, T>) -> Self {
-		from.prefab_module
-	}
-}
-
 impl<'a, T: Config> crate::exec::Executable<T> for WasmExecutable<'a, T>
 where
 	T::AccountId: UncheckedFrom<T::Hash> + AsRef<[u8]>

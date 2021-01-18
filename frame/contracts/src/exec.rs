@@ -194,7 +194,7 @@ pub trait Loader<T: Config> {
 /// Execution of code can end by either implicit termination (that is, reached the end of
 /// executable), explicit termination via returning a buffer or termination due to a trap.
 pub trait Executable<T: Config>: Sized {
-	type Module: From<Self>;
+	type Module;
 
 	fn execute<E: Ext<T = T>>(
 		&self,
