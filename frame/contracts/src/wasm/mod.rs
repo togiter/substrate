@@ -179,7 +179,7 @@ mod tests {
 	use super::*;
 	use crate::{
 		CodeHash, BalanceOf, Error, Module as Contracts,
-		exec::{Ext, StorageKey, AccountIdOf},
+		exec::{Ext, StorageKey, AccountIdOf, Executable},
 		gas::{Gas, GasMeter},
 		tests::{Test, Call, ALICE, BOB},
 		wasm::prepare::prepare_contract,
@@ -250,7 +250,7 @@ mod tests {
 		}
 		fn instantiate(
 			&mut self,
-			code_hash: &CodeHash<Test>,
+			code_hash: CodeHash<Test>,
 			endowment: u64,
 			gas_meter: &mut GasMeter<Test>,
 			data: Vec<u8>,
@@ -264,7 +264,7 @@ mod tests {
 				salt: salt.to_vec(),
 			});
 			Ok((
-				Contracts::<Test>::contract_address(&ALICE, code_hash, salt),
+				Contracts::<Test>::contract_address(&ALICE, &code_hash, salt),
 				ExecReturnValue {
 					flags: ReturnFlags::empty(),
 					data: Vec::new(),
@@ -384,7 +384,7 @@ mod tests {
 		}
 		fn instantiate(
 			&mut self,
-			code: &CodeHash<Test>,
+			code: CodeHash<Test>,
 			value: u64,
 			gas_meter: &mut GasMeter<Test>,
 			input_data: Vec<u8>,
@@ -482,23 +482,18 @@ mod tests {
 		<E::T as frame_system::Config>::AccountId:
 			UncheckedFrom<<E::T as frame_system::Config>::Hash> + AsRef<[u8]>
 	{
-		use crate::exec::Vm;
-
 		let wasm = wat::parse_str(wat).unwrap();
 		let schedule = crate::Schedule::default();
-		let prefab_module =
-			prepare_contract::<super::runtime::Env, E::T>(&wasm, &schedule).unwrap();
+		let prefab_module = prepare_contract::<E::T>(wasm, &schedule).unwrap();
 
 		let exec = WasmExecutable {
 			// Use a "call" convention.
 			entrypoint_name: "call",
 			prefab_module,
+			schedule: &schedule,
 		};
 
-		let cfg = Default::default();
-		let vm = WasmVm::new(&cfg);
-
-		vm.execute(&exec, ext, input_data, gas_meter)
+		exec.execute(ext, input_data, gas_meter)
 	}
 
 	const CODE_TRANSFER: &str = r#"

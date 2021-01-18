@@ -719,22 +719,20 @@ fn deposit_event<T: Config>(
 /// wasm VM code.
 #[cfg(test)]
 mod tests {
-	use super::{
-		BalanceOf, Event, ExecResult, ExecutionContext, Ext, Loader,
-		RawEvent, Vm, ReturnFlags, ExecError, ErrorOrigin, AccountIdOf,
-	};
+	use super::*;
 	use crate::{
 		gas::GasMeter, tests::{ExtBuilder, Test, MetaEvent},
-		exec::ExecReturnValue, CodeHash, ConfigCache,
 		gas::Gas,
 		storage::Storage,
-		tests::{ALICE, BOB, CHARLIE},
+		tests::{
+			ALICE, BOB, CHARLIE,
+			test_utils::{place_contract, set_balance, get_balance},
+		},
 		Error,
 	};
-	use crate::tests::test_utils::{place_contract, set_balance, get_balance};
 	use sp_runtime::DispatchError;
 	use assert_matches::assert_matches;
-	use std::{cell::RefCell, collections::HashMap, marker::PhantomData, rc::Rc};
+	use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 	const GAS_LIMIT: Gas = 10_000_000_000;
 
@@ -786,48 +784,48 @@ mod tests {
 		}
 	}
 
-	struct MockVm<'a> {
-		_marker: PhantomData<&'a ()>,
-	}
-
-	impl<'a> MockVm<'a> {
-		fn new() -> Self {
-			MockVm { _marker: PhantomData }
-		}
-	}
-
 	impl<'a> Loader<Test> for MockLoader<'a> {
 		type Executable = MockExecutable<'a>;
 
-		fn load_init(&self, code_hash: &CodeHash<Test>) -> Result<Self::Executable, &'static str> {
+		fn load_init(&self, code_hash: CodeHash<Test>) -> Result<Self::Executable, DispatchError> {
 			self.map
-				.get(code_hash)
+				.get(&code_hash)
 				.cloned()
-				.ok_or_else(|| "code not found")
+				.ok_or_else(|| Error::<Test>::CodeNotFound.into())
 		}
-		fn load_main(&self, code_hash: &CodeHash<Test>) -> Result<Self::Executable, &'static str> {
+		fn load_main(&self, code_hash: CodeHash<Test>) -> Result<Self::Executable, DispatchError> {
 			self.map
-				.get(code_hash)
+				.get(&code_hash)
 				.cloned()
-				.ok_or_else(|| "code not found")
+				.ok_or_else(|| Error::<Test>::CodeNotFound.into())
+		}
+		fn get_init(&self, module: ()) -> Self::Executable {
+			unimplemented!()
 		}
 	}
 
-	impl<'a> Vm<Test> for MockVm<'a> {
-		type Executable = MockExecutable<'a>;
+	impl<'a> Executable<Test> for MockExecutable<'a> {
+		type Module = ();
 
 		fn execute<E: Ext<T = Test>>(
 			&self,
-			exec: &MockExecutable,
 			mut ext: E,
 			input_data: Vec<u8>,
 			gas_meter: &mut GasMeter<Test>,
 		) -> ExecResult {
-			(exec.0)(MockCtx {
+			(self.0)(MockCtx {
 				ext: &mut ext,
 				input_data,
 				gas_meter,
 			})
+		}
+
+		fn code_hash(&self) -> &CodeHash<Test> {
+			unimplemented!()
+		}
+
+		fn store(self) -> CodeHash<Test> {
+			unimplemented!()
 		}
 	}
 
@@ -841,8 +839,6 @@ mod tests {
 		let mut gas_meter = GasMeter::<Test>::new(GAS_LIMIT);
 		let data = vec![];
 
-		let vm = MockVm::new();
-
 		let test_data = Rc::new(RefCell::new(vec![0usize]));
 
 		let mut loader = MockLoader::empty();
@@ -853,7 +849,7 @@ mod tests {
 
 		ExtBuilder::default().build().execute_with(|| {
 			let cfg = ConfigCache::preload();
-			let mut ctx = ExecutionContext::top_level(ALICE, &cfg, &vm, &loader);
+			let mut ctx = ExecutionContext::top_level(ALICE, &cfg, &loader);
 			place_contract(&BOB, exec_ch);
 
 			assert_matches!(
@@ -872,12 +868,11 @@ mod tests {
 		let origin = ALICE;
 		let dest = BOB;
 
-		let vm = MockVm::new();
 		let loader = MockLoader::empty();
 
 		ExtBuilder::default().build().execute_with(|| {
 			let cfg = ConfigCache::preload();
-			let mut ctx = ExecutionContext::top_level(origin.clone(), &cfg, &vm, &loader);
+			let mut ctx = ExecutionContext::top_level(origin.clone(), &cfg, &loader);
 			set_balance(&origin, 100);
 			set_balance(&dest, 0);
 
@@ -902,7 +897,6 @@ mod tests {
 		let origin = ALICE;
 		let dest = BOB;
 
-		let vm = MockVm::new();
 		let mut loader = MockLoader::empty();
 		let return_ch = loader.insert(
 			|_| Ok(ExecReturnValue { flags: ReturnFlags::REVERT, data: Vec::new() })
@@ -910,7 +904,7 @@ mod tests {
 
 		ExtBuilder::default().build().execute_with(|| {
 			let cfg = ConfigCache::preload();
-			let mut ctx = ExecutionContext::top_level(origin.clone(), &cfg, &vm, &loader);
+			let mut ctx = ExecutionContext::top_level(origin.clone(), &cfg, &loader);
 			place_contract(&BOB, return_ch);
 			set_balance(&origin, 100);
 			let balance = get_balance(&dest);
@@ -937,12 +931,11 @@ mod tests {
 		let origin = ALICE;
 		let dest = BOB;
 
-		let vm = MockVm::new();
 		let loader = MockLoader::empty();
 
 		ExtBuilder::default().build().execute_with(|| {
 			let cfg = ConfigCache::preload();
-			let mut ctx = ExecutionContext::top_level(origin.clone(), &cfg, &vm, &loader);
+			let mut ctx = ExecutionContext::top_level(origin.clone(), &cfg, &loader);
 			set_balance(&origin, 0);
 
 			let result = super::transfer(
@@ -970,7 +963,6 @@ mod tests {
 		let origin = ALICE;
 		let dest = BOB;
 
-		let vm = MockVm::new();
 		let mut loader = MockLoader::empty();
 		let return_ch = loader.insert(
 			|_| Ok(ExecReturnValue { flags: ReturnFlags::empty(), data: vec![1, 2, 3, 4] })
@@ -978,7 +970,7 @@ mod tests {
 
 		ExtBuilder::default().build().execute_with(|| {
 			let cfg = ConfigCache::preload();
-			let mut ctx = ExecutionContext::top_level(origin, &cfg, &vm, &loader);
+			let mut ctx = ExecutionContext::top_level(origin, &cfg, &loader);
 			place_contract(&BOB, return_ch);
 
 			let result = ctx.call(
@@ -1001,7 +993,6 @@ mod tests {
 		let origin = ALICE;
 		let dest = BOB;
 
-		let vm = MockVm::new();
 		let mut loader = MockLoader::empty();
 		let return_ch = loader.insert(
 			|_| Ok(ExecReturnValue { flags: ReturnFlags::REVERT, data: vec![1, 2, 3, 4] })
@@ -1009,7 +1000,7 @@ mod tests {
 
 		ExtBuilder::default().build().execute_with(|| {
 			let cfg = ConfigCache::preload();
-			let mut ctx = ExecutionContext::top_level(origin, &cfg, &vm, &loader);
+			let mut ctx = ExecutionContext::top_level(origin, &cfg, &loader);
 			place_contract(&BOB, return_ch);
 
 			let result = ctx.call(
@@ -1027,7 +1018,6 @@ mod tests {
 
 	#[test]
 	fn input_data_to_call() {
-		let vm = MockVm::new();
 		let mut loader = MockLoader::empty();
 		let input_data_ch = loader.insert(|ctx| {
 			assert_eq!(ctx.input_data, &[1, 2, 3, 4]);
@@ -1037,7 +1027,7 @@ mod tests {
 		// This one tests passing the input data into a contract via call.
 		ExtBuilder::default().build().execute_with(|| {
 			let cfg = ConfigCache::preload();
-			let mut ctx = ExecutionContext::top_level(ALICE, &cfg, &vm, &loader);
+			let mut ctx = ExecutionContext::top_level(ALICE, &cfg, &loader);
 			place_contract(&BOB, input_data_ch);
 
 			let result = ctx.call(
@@ -1052,7 +1042,6 @@ mod tests {
 
 	#[test]
 	fn input_data_to_instantiate() {
-		let vm = MockVm::new();
 		let mut loader = MockLoader::empty();
 		let input_data_ch = loader.insert(|ctx| {
 			assert_eq!(ctx.input_data, &[1, 2, 3, 4]);
@@ -1062,14 +1051,14 @@ mod tests {
 		// This one tests passing the input data into a contract via instantiate.
 		ExtBuilder::default().build().execute_with(|| {
 			let cfg = ConfigCache::preload();
-			let mut ctx = ExecutionContext::top_level(ALICE, &cfg, &vm, &loader);
+			let mut ctx = ExecutionContext::top_level(ALICE, &cfg, &loader);
 
 			set_balance(&ALICE, cfg.subsistence_threshold() * 10);
 
 			let result = ctx.instantiate(
 				cfg.subsistence_threshold() * 3,
 				&mut GasMeter::<Test>::new(GAS_LIMIT),
-				&input_data_ch,
+				&loader.map.get(&input_data_ch).unwrap(),
 				vec![1, 2, 3, 4],
 				&[],
 			);
@@ -1084,7 +1073,6 @@ mod tests {
 		let value = Default::default();
 		let reached_bottom = RefCell::new(false);
 
-		let vm = MockVm::new();
 		let mut loader = MockLoader::empty();
 		let recurse_ch = loader.insert(|ctx| {
 			// Try to call into yourself.
@@ -1109,7 +1097,7 @@ mod tests {
 
 		ExtBuilder::default().build().execute_with(|| {
 			let cfg = ConfigCache::preload();
-			let mut ctx = ExecutionContext::top_level(ALICE, &cfg, &vm, &loader);
+			let mut ctx = ExecutionContext::top_level(ALICE, &cfg, &loader);
 			set_balance(&BOB, 1);
 			place_contract(&BOB, recurse_ch);
 
@@ -1128,8 +1116,6 @@ mod tests {
 	fn caller_returns_proper_values() {
 		let origin = ALICE;
 		let dest = BOB;
-
-		let vm = MockVm::new();
 
 		let witnessed_caller_bob = RefCell::new(None::<AccountIdOf<Test>>);
 		let witnessed_caller_charlie = RefCell::new(None::<AccountIdOf<Test>>);
@@ -1155,7 +1141,7 @@ mod tests {
 		ExtBuilder::default().build().execute_with(|| {
 			let cfg = ConfigCache::preload();
 
-			let mut ctx = ExecutionContext::top_level(origin.clone(), &cfg, &vm, &loader);
+			let mut ctx = ExecutionContext::top_level(origin.clone(), &cfg, &loader);
 			place_contract(&dest, bob_ch);
 			place_contract(&CHARLIE, charlie_ch);
 
@@ -1175,8 +1161,6 @@ mod tests {
 
 	#[test]
 	fn address_returns_proper_values() {
-		let vm = MockVm::new();
-
 		let mut loader = MockLoader::empty();
 		let bob_ch = loader.insert(|ctx| {
 			// Verify that address matches BOB.
@@ -1196,7 +1180,7 @@ mod tests {
 
 		ExtBuilder::default().build().execute_with(|| {
 			let cfg = ConfigCache::preload();
-			let mut ctx = ExecutionContext::top_level(ALICE, &cfg, &vm, &loader);
+			let mut ctx = ExecutionContext::top_level(ALICE, &cfg, &loader);
 			place_contract(&BOB, bob_ch);
 			place_contract(&CHARLIE, charlie_ch);
 
@@ -1213,20 +1197,18 @@ mod tests {
 
 	#[test]
 	fn refuse_instantiate_with_value_below_existential_deposit() {
-		let vm = MockVm::new();
-
 		let mut loader = MockLoader::empty();
 		let dummy_ch = loader.insert(|_| exec_success());
 
 		ExtBuilder::default().existential_deposit(15).build().execute_with(|| {
 			let cfg = ConfigCache::preload();
-			let mut ctx = ExecutionContext::top_level(ALICE, &cfg, &vm, &loader);
+			let mut ctx = ExecutionContext::top_level(ALICE, &cfg, &loader);
 
 			assert_matches!(
 				ctx.instantiate(
 					0, // <- zero endowment
 					&mut GasMeter::<Test>::new(GAS_LIMIT),
-					&dummy_ch,
+					&loader.map.get(&dummy_ch).unwrap(),
 					vec![],
 					&[],
 				),
@@ -1237,8 +1219,6 @@ mod tests {
 
 	#[test]
 	fn instantiation_work_with_success_output() {
-		let vm = MockVm::new();
-
 		let mut loader = MockLoader::empty();
 		let dummy_ch = loader.insert(
 			|_| Ok(ExecReturnValue { flags: ReturnFlags::empty(), data: vec![80, 65, 83, 83] })
@@ -1246,14 +1226,14 @@ mod tests {
 
 		ExtBuilder::default().existential_deposit(15).build().execute_with(|| {
 			let cfg = ConfigCache::preload();
-			let mut ctx = ExecutionContext::top_level(ALICE, &cfg, &vm, &loader);
+			let mut ctx = ExecutionContext::top_level(ALICE, &cfg, &loader);
 			set_balance(&ALICE, 1000);
 
 			let instantiated_contract_address = assert_matches!(
 				ctx.instantiate(
 					100,
 					&mut GasMeter::<Test>::new(GAS_LIMIT),
-					&dummy_ch,
+					&loader.map.get(&dummy_ch).unwrap(),
 					vec![],
 					&[],
 				),
@@ -1271,8 +1251,6 @@ mod tests {
 
 	#[test]
 	fn instantiation_fails_with_failing_output() {
-		let vm = MockVm::new();
-
 		let mut loader = MockLoader::empty();
 		let dummy_ch = loader.insert(
 			|_| Ok(ExecReturnValue { flags: ReturnFlags::REVERT, data: vec![70, 65, 73, 76] })
@@ -1280,14 +1258,14 @@ mod tests {
 
 		ExtBuilder::default().existential_deposit(15).build().execute_with(|| {
 			let cfg = ConfigCache::preload();
-			let mut ctx = ExecutionContext::top_level(ALICE, &cfg, &vm, &loader);
+			let mut ctx = ExecutionContext::top_level(ALICE, &cfg, &loader);
 			set_balance(&ALICE, 1000);
 
 			let instantiated_contract_address = assert_matches!(
 				ctx.instantiate(
 					100,
 					&mut GasMeter::<Test>::new(GAS_LIMIT),
-					&dummy_ch,
+					&loader.map.get(&dummy_ch).unwrap(),
 					vec![],
 					&[],
 				),
@@ -1302,8 +1280,6 @@ mod tests {
 
 	#[test]
 	fn instantiation_from_contract() {
-		let vm = MockVm::new();
-
 		let mut loader = MockLoader::empty();
 		let dummy_ch = loader.insert(|_| exec_success());
 		let instantiated_contract_address = Rc::new(RefCell::new(None::<AccountIdOf<Test>>));
@@ -1313,7 +1289,7 @@ mod tests {
 			move |ctx| {
 				// Instantiate a contract and save it's address in `instantiated_contract_address`.
 				let (address, output) = ctx.ext.instantiate(
-					&dummy_ch,
+					dummy_ch,
 					ConfigCache::<Test>::subsistence_threshold_uncached() * 3,
 					ctx.gas_meter,
 					vec![],
@@ -1327,7 +1303,7 @@ mod tests {
 
 		ExtBuilder::default().existential_deposit(15).build().execute_with(|| {
 			let cfg = ConfigCache::preload();
-			let mut ctx = ExecutionContext::top_level(ALICE, &cfg, &vm, &loader);
+			let mut ctx = ExecutionContext::top_level(ALICE, &cfg, &loader);
 			set_balance(&ALICE, cfg.subsistence_threshold() * 100);
 			place_contract(&BOB, instantiator_ch);
 
@@ -1349,8 +1325,6 @@ mod tests {
 
 	#[test]
 	fn instantiation_traps() {
-		let vm = MockVm::new();
-
 		let mut loader = MockLoader::empty();
 		let dummy_ch = loader.insert(
 			|_| Err("It's a trap!".into())
@@ -1361,7 +1335,7 @@ mod tests {
 				// Instantiate a contract and save it's address in `instantiated_contract_address`.
 				assert_matches!(
 					ctx.ext.instantiate(
-						&dummy_ch,
+						dummy_ch,
 						15u64,
 						ctx.gas_meter,
 						vec![],
@@ -1379,7 +1353,7 @@ mod tests {
 
 		ExtBuilder::default().existential_deposit(15).build().execute_with(|| {
 			let cfg = ConfigCache::preload();
-			let mut ctx = ExecutionContext::top_level(ALICE, &cfg, &vm, &loader);
+			let mut ctx = ExecutionContext::top_level(ALICE, &cfg, &loader);
 			set_balance(&ALICE, 1000);
 			set_balance(&BOB, 100);
 			place_contract(&BOB, instantiator_ch);
@@ -1397,8 +1371,6 @@ mod tests {
 
 	#[test]
 	fn termination_from_instantiate_fails() {
-		let vm = MockVm::new();
-
 		let mut loader = MockLoader::empty();
 
 		let terminate_ch = loader.insert(|ctx| {
@@ -1411,14 +1383,14 @@ mod tests {
 			.build()
 			.execute_with(|| {
 				let cfg = ConfigCache::preload();
-				let mut ctx = ExecutionContext::top_level(ALICE, &cfg, &vm, &loader);
+				let mut ctx = ExecutionContext::top_level(ALICE, &cfg, &loader);
 				set_balance(&ALICE, 1000);
 
 				assert_eq!(
 					ctx.instantiate(
 						100,
 						&mut GasMeter::<Test>::new(GAS_LIMIT),
-						&terminate_ch,
+						&loader.map.get(&terminate_ch).unwrap(),
 						vec![],
 						&[],
 					),
@@ -1434,7 +1406,6 @@ mod tests {
 
 	#[test]
 	fn rent_allowance() {
-		let vm = MockVm::new();
 		let mut loader = MockLoader::empty();
 		let rent_allowance_ch = loader.insert(|ctx| {
 			let allowance = ConfigCache::<Test>::subsistence_threshold_uncached() * 3;
@@ -1446,13 +1417,13 @@ mod tests {
 
 		ExtBuilder::default().build().execute_with(|| {
 			let cfg = ConfigCache::preload();
-			let mut ctx = ExecutionContext::top_level(ALICE, &cfg, &vm, &loader);
+			let mut ctx = ExecutionContext::top_level(ALICE, &cfg, &loader);
 			set_balance(&ALICE, cfg.subsistence_threshold() * 10);
 
 			let result = ctx.instantiate(
 				cfg.subsistence_threshold() * 5,
 				&mut GasMeter::<Test>::new(GAS_LIMIT),
-				&rent_allowance_ch,
+				&loader.map.get(&rent_allowance_ch).unwrap(),
 				vec![],
 				&[],
 			);
