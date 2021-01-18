@@ -177,10 +177,10 @@ pub trait Loader<T: Config> {
 
 	/// Load the initializer portion of the code specified by the `code_hash`. This
 	/// executable is called upon instantiation.
-	fn load_init(&self, code_hash: &CodeHash<T>) -> Result<Self::Executable, &'static str>;
+	fn load_init(&self, code_hash: CodeHash<T>) -> Result<Self::Executable, &'static str>;
 	/// Load the main portion of the code specified by the `code_hash`. This executable
 	/// is called for each call to a contract.
-	fn load_main(&self, code_hash: &CodeHash<T>) -> Result<Self::Executable, &'static str>;
+	fn load_main(&self, code_hash: CodeHash<T>) -> Result<Self::Executable, &'static str>;
 
 	fn get_init(&self, module: <Self::Executable as Executable<T>>::Module) -> Self::Executable;
 }
@@ -202,6 +202,8 @@ pub trait Executable<T: Config>: Sized {
 		input_data: Vec<u8>,
 		gas_meter: &mut GasMeter<T>,
 	) -> ExecResult;
+
+	fn code_hash(&self) -> &CodeHash<T>;
 }
 
 pub struct ExecutionContext<'a, T: Config + 'a, L> {
@@ -291,7 +293,7 @@ where
 				)?
 			}
 
-			let executable = nested.loader.load_main(&contract.code_hash)
+			let executable = nested.loader.load_main(contract.code_hash)
 				.map_err(|_| Error::<T>::CodeNotFound)?;
 			let output = executable.execute(
 				nested.new_call_context(caller, value),
@@ -306,7 +308,7 @@ where
 		&mut self,
 		endowment: BalanceOf<T>,
 		gas_meter: &mut GasMeter<T>,
-		code_hash: &CodeHash<T>,
+		executable: &L::Executable,
 		input_data: Vec<u8>,
 		salt: &[u8],
 	) -> Result<(T::AccountId, ExecReturnValue), ExecError> {
@@ -316,7 +318,7 @@ where
 
 		let transactor_kind = self.transactor_kind();
 		let caller = self.self_account.clone();
-		let dest = Contracts::<T>::contract_address(&caller, code_hash, salt);
+		let dest = Contracts::<T>::contract_address(&caller, executable.code_hash(), salt);
 
 		let output = frame_support::storage::with_transaction(|| {
 			// Generate the trie id in a new transaction to only increment the counter on success.
@@ -329,7 +331,7 @@ where
 						.self_trie_id
 						.clone()
 						.expect("the nested context always has to have self_trie_id"),
-					code_hash.clone()
+					executable.code_hash().clone()
 				)?;
 
 				// Send funds unconditionally here. If the `endowment` is below existential_deposit
@@ -343,8 +345,6 @@ where
 					nested,
 				)?;
 
-				let executable = nested.loader.load_init(&code_hash)
-					.map_err(|_| Error::<T>::CodeNotFound)?;
 				let output = executable.execute(
 					nested.new_call_context(caller.clone(), endowment),
 					input_data,
@@ -536,7 +536,9 @@ where
 		input_data: Vec<u8>,
 		salt: &[u8],
 	) -> Result<(AccountIdOf<T>, ExecReturnValue), ExecError> {
-		self.ctx.instantiate(endowment, gas_meter, code_hash, input_data, salt)
+		let executable = self.ctx.loader.load_init(code_hash.clone())
+			.map_err(|_| Error::<T>::CodeNotFound)?;
+		self.ctx.instantiate(endowment, gas_meter, &executable, input_data, salt)
 	}
 
 	fn transfer(

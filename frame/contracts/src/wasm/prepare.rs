@@ -25,7 +25,7 @@ use crate::{
 	wasm::{PrefabWasmModule, env_def::ImportSatisfyCheck},
 };
 use parity_wasm::elements::{self, Internal, External, MemoryType, Type, ValueType};
-use pwasm_utils;
+use sp_runtime::traits::Hash;
 use sp_std::prelude::*;
 
 /// Currently, all imported functions must be located inside this module. We might support
@@ -419,10 +419,10 @@ fn get_memory_limits<T: Config>(module: Option<&MemoryType>, schedule: &Schedule
 ///
 /// The preprocessing includes injecting code for gas metering and metering the height of stack.
 pub fn prepare_contract<C: ImportSatisfyCheck, T: Config>(
-	original_code: &[u8],
+	original_code: Vec<u8>,
 	schedule: &Schedule<T>,
-) -> Result<PrefabWasmModule, &'static str> {
-	let mut contract_module = ContractModule::new(original_code, schedule)?;
+) -> Result<PrefabWasmModule<T>, &'static str> {
+	let mut contract_module = ContractModule::new(&original_code, schedule)?;
 	contract_module.scan_exports()?;
 	contract_module.ensure_no_internal_memory()?;
 	contract_module.ensure_table_size_limit(schedule.limits.table_size)?;
@@ -449,6 +449,8 @@ pub fn prepare_contract<C: ImportSatisfyCheck, T: Config>(
 		_reserved: None,
 		code: contract_module.into_wasm_code()?,
 		refcount: 1,
+		code_hash: T::Hashing::hash(&original_code),
+		original_code: Some(original_code),
 	})
 }
 

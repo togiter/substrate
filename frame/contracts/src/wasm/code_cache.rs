@@ -38,7 +38,7 @@ use frame_support::StorageMap;
 /// Increments the refcount of the in-storage `prefab_module` if it already exists in storage
 /// under the specified `code_hash`.
 pub fn store<T: Config>(
-	prefab_module: PrefabWasmModule,
+	prefab_module: PrefabWasmModule<T>,
 	original_code: Vec<u8>,
 	code_hash: &CodeHash<T>,
 ) where T::AccountId: UncheckedFrom<T::Hash> + AsRef<[u8]> {
@@ -81,9 +81,9 @@ pub fn prepare_and_store_unchecked<T: Config>(
 /// the current one given as an argument, then this function will perform
 /// re-instrumentation and update the cache in the storage.
 pub fn load<T: Config>(
-	code_hash: &CodeHash<T>,
+	code_hash: CodeHash<T>,
 	schedule: &Schedule<T>,
-) -> Result<PrefabWasmModule, &'static str> where T::AccountId: UncheckedFrom<T::Hash> + AsRef<[u8]> {
+) -> Result<PrefabWasmModule<T>, &'static str> where T::AccountId: UncheckedFrom<T::Hash> + AsRef<[u8]> {
 	let mut prefab_module =
 		<CodeStorage<T>>::get(code_hash).ok_or_else(|| "code is not found")?;
 
@@ -94,8 +94,9 @@ pub fn load<T: Config>(
 		// We need to re-instrument the code with the latest schedule here.
 		let original_code =
 			<PristineCode<T>>::get(code_hash).ok_or_else(|| "pristine code is not found")?;
-		prefab_module = prepare::prepare_contract::<Env, T>(&original_code, schedule)?;
+		prefab_module = prepare::prepare_contract::<Env, T>(original_code, schedule)?;
 		<CodeStorage<T>>::insert(&code_hash, &prefab_module);
 	}
+	prefab_module.code_hash = code_hash;
 	Ok(prefab_module)
 }

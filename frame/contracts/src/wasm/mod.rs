@@ -47,7 +47,7 @@ pub use self::code_cache::prepare_and_store_unchecked as prepare_and_store_unche
 
 /// A prepared wasm module ready for execution.
 #[derive(Clone, Encode, Decode)]
-pub struct PrefabWasmModule {
+pub struct PrefabWasmModule<T: Config> {
 	/// Version of the schedule with which the code was instrumented.
 	#[codec(compact)]
 	schedule_version: u32,
@@ -66,12 +66,16 @@ pub struct PrefabWasmModule {
 	///
 	/// If this number drops to zero this module is removed from storage.
 	refcount: u32,
+	#[codec(skip)]
+	code_hash: CodeHash<T>,
+	#[codec(skip)]
+	original_code: Option<Vec<u8>>,
 }
 
 /// Wasm executable loaded by `WasmLoader` and executed by `WasmVm`.
 pub struct WasmExecutable<'a, T: Config> {
 	entrypoint_name: &'static str,
-	prefab_module: PrefabWasmModule,
+	prefab_module: PrefabWasmModule<T>,
 	schedule: &'a Schedule<T>,
 }
 
@@ -92,7 +96,7 @@ where
 {
 	type Executable = WasmExecutable<'a, T>;
 
-	fn load_init(&self, code_hash: &CodeHash<T>) -> Result<WasmExecutable<'a, T>, &'static str> {
+	fn load_init(&self, code_hash: CodeHash<T>) -> Result<WasmExecutable<'a, T>, &'static str> {
 		let prefab_module = load_code::<T>(code_hash, self.schedule)?;
 		Ok(WasmExecutable {
 			entrypoint_name: "deploy",
@@ -100,7 +104,7 @@ where
 			schedule: self.schedule,
 		})
 	}
-	fn load_main(&self, code_hash: &CodeHash<T>) -> Result<WasmExecutable<'a, T>, &'static str> {
+	fn load_main(&self, code_hash: CodeHash<T>) -> Result<WasmExecutable<'a, T>, &'static str> {
 		let prefab_module = load_code::<T>(code_hash, self.schedule)?;
 		Ok(WasmExecutable {
 			entrypoint_name: "call",
@@ -108,7 +112,7 @@ where
 			schedule: self.schedule,
 		})
 	}
-	fn get_init(&self, module: PrefabWasmModule) -> Self::Executable {
+	fn get_init(&self, module: PrefabWasmModule<T>) -> Self::Executable {
 		WasmExecutable {
 			entrypoint_name: "init",
 			prefab_module: module,
@@ -117,7 +121,7 @@ where
 	}
 }
 
-impl<'a, T: Config> From<WasmExecutable<'a, T>> for PrefabWasmModule {
+impl<'a, T: Config> From<WasmExecutable<'a, T>> for PrefabWasmModule<T> {
 	fn from(from: WasmExecutable<'a, T>) -> Self {
 		from.prefab_module
 	}
@@ -127,7 +131,7 @@ impl<'a, T: Config> crate::exec::Executable<T> for WasmExecutable<'a, T>
 where
 	T::AccountId: UncheckedFrom<T::Hash> + AsRef<[u8]>
 {
-	type Module = PrefabWasmModule;
+	type Module = PrefabWasmModule<T>;
 
 	fn execute<E: Ext<T = T>>(
 		&self,
@@ -166,6 +170,10 @@ where
 		let result = sp_sandbox::Instance::new(&self.prefab_module.code, &imports, &mut runtime)
 			.and_then(|mut instance| instance.invoke(self.entrypoint_name, &[], &mut runtime));
 		runtime.to_execution_result(result)
+	}
+
+	fn code_hash(&self) -> &CodeHash<T> {
+		&self.prefab_module.code_hash
 	}
 }
 

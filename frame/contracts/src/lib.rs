@@ -619,9 +619,11 @@ decl_module! {
 		) -> DispatchResultWithPostInfo {
 			let origin = ensure_signed(origin)?;
 			let mut gas_meter = GasMeter::new(gas_limit);
-
 			let result = Self::execute_wasm(origin, &mut gas_meter, |ctx, gas_meter| {
-				ctx.instantiate(endowment, gas_meter, &code_hash, data, &salt)
+				use crate::exec::Loader;
+				let executable = ctx.loader.load_init(code_hash)
+					.map_err(|_| Error::<T>::CodeNotFound)?;
+				ctx.instantiate(endowment, gas_meter, &executable, data, &salt)
 					.map(|(_address, output)| output)
 			});
 			gas_meter.into_dispatch_result(result)
@@ -821,7 +823,7 @@ decl_storage! {
 		/// A mapping from an original code hash to the original code, untouched by instrumentation.
 		pub PristineCode: map hasher(identity) CodeHash<T> => Option<Vec<u8>>;
 		/// A mapping between an original code hash and instrumented wasm code, ready for execution.
-		pub CodeStorage: map hasher(identity) CodeHash<T> => Option<wasm::PrefabWasmModule>;
+		pub CodeStorage: map hasher(identity) CodeHash<T> => Option<wasm::PrefabWasmModule<T>>;
 		/// The subtrie counter.
 		pub AccountCounter: u64 = 0;
 		/// The code associated with a given account.
