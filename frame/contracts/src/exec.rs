@@ -73,7 +73,7 @@ pub trait Ext {
 	/// transferred from this to the newly created account (also known as endowment).
 	fn instantiate(
 		&mut self,
-		code: &CodeHash<Self::T>,
+		code: CodeHash<Self::T>,
 		value: BalanceOf<Self::T>,
 		gas_meter: &mut GasMeter<Self::T>,
 		input_data: Vec<u8>,
@@ -531,13 +531,13 @@ where
 
 	fn instantiate(
 		&mut self,
-		code_hash: &CodeHash<T>,
+		code_hash: CodeHash<T>,
 		endowment: BalanceOf<T>,
 		gas_meter: &mut GasMeter<T>,
 		input_data: Vec<u8>,
 		salt: &[u8],
 	) -> Result<(AccountIdOf<T>, ExecReturnValue), ExecError> {
-		let executable = self.ctx.loader.load_init(code_hash.clone())?;
+		let executable = self.ctx.loader.load_init(code_hash)?;
 		let result = self.ctx.instantiate(endowment, gas_meter, &executable, input_data, salt);
 		// increment refcounter
 		if result.is_ok() {
