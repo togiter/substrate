@@ -43,6 +43,8 @@ where
 	T::AccountId: UncheckedFrom<T::Hash> + AsRef<[u8]>
 {
 	let code_hash = sp_std::mem::take(&mut prefab_module.code_hash);
+	// code_hash is only `Some` if the contract was instantiated from a new code
+	// but `None` if it was loaded from storage.
 	if let Some(code) = prefab_module.original_code.take() {
 		<PristineCode<T>>::insert(&code_hash, code);
 	}
