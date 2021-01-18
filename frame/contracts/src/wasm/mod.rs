@@ -69,9 +69,10 @@ pub struct PrefabWasmModule {
 }
 
 /// Wasm executable loaded by `WasmLoader` and executed by `WasmVm`.
-pub struct WasmExecutable {
+pub struct WasmExecutable<'a, T: Config> {
 	entrypoint_name: &'static str,
 	prefab_module: PrefabWasmModule,
+	schedule: &'a Schedule<T>,
 }
 
 /// Loader which fetches `WasmExecutable` from the code cache.
@@ -89,50 +90,38 @@ impl<'a, T: Config> crate::exec::Loader<T> for WasmLoader<'a, T>
 where
 	T::AccountId: UncheckedFrom<T::Hash> + AsRef<[u8]>
 {
-	type Executable = WasmExecutable;
+	type Executable = WasmExecutable<'a, T>;
 
-	fn load_init(&self, code_hash: &CodeHash<T>) -> Result<WasmExecutable, &'static str> {
+	fn load_init(&self, code_hash: &CodeHash<T>) -> Result<WasmExecutable<'a, T>, &'static str> {
 		let prefab_module = load_code::<T>(code_hash, self.schedule)?;
 		Ok(WasmExecutable {
 			entrypoint_name: "deploy",
 			prefab_module,
+			schedule: self.schedule,
 		})
 	}
-	fn load_main(&self, code_hash: &CodeHash<T>) -> Result<WasmExecutable, &'static str> {
+	fn load_main(&self, code_hash: &CodeHash<T>) -> Result<WasmExecutable<'a, T>, &'static str> {
 		let prefab_module = load_code::<T>(code_hash, self.schedule)?;
 		Ok(WasmExecutable {
 			entrypoint_name: "call",
 			prefab_module,
+			schedule: self.schedule,
 		})
 	}
 }
 
-/// Implementation of `Vm` that takes `WasmExecutable` and executes it.
-pub struct WasmVm<'a, T: Config> where T::AccountId: UncheckedFrom<T::Hash> + AsRef<[u8]> {
-	schedule: &'a Schedule<T>,
-}
-
-impl<'a, T: Config> WasmVm<'a, T> where T::AccountId: UncheckedFrom<T::Hash> + AsRef<[u8]> {
-	pub fn new(schedule: &'a Schedule<T>) -> Self {
-		WasmVm { schedule }
-	}
-}
-
-impl<'a, T: Config> crate::exec::Vm<T> for WasmVm<'a, T>
+impl<'a, T: Config> crate::exec::Executable<T> for WasmExecutable<'a, T>
 where
 	T::AccountId: UncheckedFrom<T::Hash> + AsRef<[u8]>
 {
-	type Executable = WasmExecutable;
-
 	fn execute<E: Ext<T = T>>(
 		&self,
-		exec: &WasmExecutable,
 		mut ext: E,
 		input_data: Vec<u8>,
 		gas_meter: &mut GasMeter<E::T>,
 	) -> ExecResult {
 		let memory =
-			sp_sandbox::Memory::new(exec.prefab_module.initial, Some(exec.prefab_module.maximum))
+			sp_sandbox::Memory::new(self.prefab_module.initial, Some(self.prefab_module.maximum))
 				.unwrap_or_else(|_| {
 				// unlike `.expect`, explicit panic preserves the source location.
 				// Needed as we can't use `RUST_BACKTRACE` in here.
@@ -159,8 +148,8 @@ where
 
 		// Instantiate the instance from the instrumented module code and invoke the contract
 		// entrypoint.
-		let result = sp_sandbox::Instance::new(&exec.prefab_module.code, &imports, &mut runtime)
-			.and_then(|mut instance| instance.invoke(exec.entrypoint_name, &[], &mut runtime));
+		let result = sp_sandbox::Instance::new(&self.prefab_module.code, &imports, &mut runtime)
+			.and_then(|mut instance| instance.invoke(self.entrypoint_name, &[], &mut runtime));
 		runtime.to_execution_result(result)
 	}
 }

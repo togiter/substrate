@@ -104,7 +104,7 @@ pub use crate::{
 };
 use crate::{
 	exec::ExecutionContext,
-	wasm::{WasmLoader, WasmVm},
+	wasm::WasmLoader,
 	rent::Rent,
 	storage::Storage,
 };
@@ -759,12 +759,11 @@ where
 	fn execute_wasm(
 		origin: T::AccountId,
 		gas_meter: &mut GasMeter<T>,
-		func: impl FnOnce(&mut ExecutionContext<T, WasmVm<T>, WasmLoader<T>>, &mut GasMeter<T>) -> ExecResult,
+		func: impl FnOnce(&mut ExecutionContext<T, WasmLoader<T>>, &mut GasMeter<T>) -> ExecResult,
 	) -> ExecResult {
 		let cfg = ConfigCache::preload();
-		let vm = WasmVm::new(&cfg.schedule);
 		let loader = WasmLoader::new(&cfg.schedule);
-		let mut ctx = ExecutionContext::top_level(origin, &cfg, &vm, &loader);
+		let mut ctx = ExecutionContext::top_level(origin, &cfg, &loader);
 		func(&mut ctx, gas_meter)
 	}
 }

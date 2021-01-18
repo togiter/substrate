@@ -173,7 +173,7 @@ pub trait Ext {
 /// Loader is a companion of the `Vm` trait. It loads an appropriate abstract
 /// executable to be executed by an accompanying `Vm` implementation.
 pub trait Loader<T: Config> {
-	type Executable;
+	type Executable: Executable<T>;
 
 	/// Load the initializer portion of the code specified by the `code_hash`. This
 	/// executable is called upon instantiation.
@@ -191,49 +191,43 @@ pub trait Loader<T: Config> {
 ///
 /// Execution of code can end by either implicit termination (that is, reached the end of
 /// executable), explicit termination via returning a buffer or termination due to a trap.
-pub trait Vm<T: Config> {
-	type Executable;
-
+pub trait Executable<T: Config> {
 	fn execute<E: Ext<T = T>>(
 		&self,
-		exec: &Self::Executable,
 		ext: E,
 		input_data: Vec<u8>,
 		gas_meter: &mut GasMeter<T>,
 	) -> ExecResult;
 }
 
-pub struct ExecutionContext<'a, T: Config + 'a, V, L> {
-	pub caller: Option<&'a ExecutionContext<'a, T, V, L>>,
+pub struct ExecutionContext<'a, T: Config + 'a, L> {
+	pub caller: Option<&'a ExecutionContext<'a, T, L>>,
 	pub self_account: T::AccountId,
 	pub self_trie_id: Option<TrieId>,
 	pub depth: usize,
 	pub config: &'a ConfigCache<T>,
-	pub vm: &'a V,
 	pub loader: &'a L,
 	pub timestamp: MomentOf<T>,
 	pub block_number: T::BlockNumber,
 }
 
-impl<'a, T, E, V, L> ExecutionContext<'a, T, V, L>
+impl<'a, T, L> ExecutionContext<'a, T, L>
 where
 	T: Config,
 	T::AccountId: UncheckedFrom<T::Hash> + AsRef<[u8]>,
-	L: Loader<T, Executable = E>,
-	V: Vm<T, Executable = E>,
+	L: Loader<T>,
 {
 	/// Create the top level execution context.
 	///
 	/// The specified `origin` address will be used as `sender` for. The `origin` must be a regular
 	/// account (not a contract).
-	pub fn top_level(origin: T::AccountId, cfg: &'a ConfigCache<T>, vm: &'a V, loader: &'a L) -> Self {
+	pub fn top_level(origin: T::AccountId, cfg: &'a ConfigCache<T>, loader: &'a L) -> Self {
 		ExecutionContext {
 			caller: None,
 			self_trie_id: None,
 			self_account: origin,
 			depth: 0,
 			config: &cfg,
-			vm: &vm,
 			loader: &loader,
 			timestamp: T::Time::now(),
 			block_number: <frame_system::Module<T>>::block_number(),
@@ -241,7 +235,7 @@ where
 	}
 
 	fn nested<'b, 'c: 'b>(&'c self, dest: T::AccountId, trie_id: TrieId)
-		-> ExecutionContext<'b, T, V, L>
+		-> ExecutionContext<'b, T, L>
 	{
 		ExecutionContext {
 			caller: Some(self),
@@ -249,7 +243,6 @@ where
 			self_account: dest,
 			depth: self.depth + 1,
 			config: self.config,
-			vm: self.vm,
 			loader: self.loader,
 			timestamp: self.timestamp.clone(),
 			block_number: self.block_number.clone(),
@@ -296,8 +289,7 @@ where
 
 			let executable = nested.loader.load_main(&contract.code_hash)
 				.map_err(|_| Error::<T>::CodeNotFound)?;
-			let output = nested.vm.execute(
-				&executable,
+			let output = executable.execute(
 				nested.new_call_context(caller, value),
 				input_data,
 				gas_meter,
@@ -349,13 +341,11 @@ where
 
 				let executable = nested.loader.load_init(&code_hash)
 					.map_err(|_| Error::<T>::CodeNotFound)?;
-				let output = nested.vm
-					.execute(
-						&executable,
-						nested.new_call_context(caller.clone(), endowment),
-						input_data,
-						gas_meter,
-					).map_err(|e| ExecError { error: e.error, origin: ErrorOrigin::Callee })?;
+				let output = executable.execute(
+					nested.new_call_context(caller.clone(), endowment),
+					input_data,
+					gas_meter,
+				).map_err(|e| ExecError { error: e.error, origin: ErrorOrigin::Callee })?;
 
 
 				// Collect the rent for the first block to prevent the creation of very large
@@ -387,7 +377,7 @@ where
 		&'b mut self,
 		caller: T::AccountId,
 		value: BalanceOf<T>,
-	) -> CallContext<'b, 'a, T, V, L> {
+	) -> CallContext<'b, 'a, T, L> {
 		let timestamp = self.timestamp.clone();
 		let block_number = self.block_number.clone();
 		CallContext {
@@ -402,7 +392,7 @@ where
 	/// Execute the given closure within a nested execution context.
 	fn with_nested_context<F>(&mut self, dest: T::AccountId, trie_id: TrieId, func: F)
 		-> ExecResult
-		where F: FnOnce(&mut ExecutionContext<T, V, L>) -> ExecResult
+		where F: FnOnce(&mut ExecutionContext<T, L>) -> ExecResult
 	{
 		use frame_support::storage::TransactionOutcome::*;
 		let mut nested = self.nested(dest, trie_id);
@@ -447,13 +437,13 @@ enum TransferCause {
 /// is specified as `Terminate`. Otherwise, any transfer that would bring the sender below the
 /// subsistence threshold (for contracts) or the existential deposit (for plain accounts)
 /// results in an error.
-fn transfer<'a, T: Config, V: Vm<T>, L: Loader<T>>(
+fn transfer<'a, T: Config, L: Loader<T>>(
 	cause: TransferCause,
 	origin: TransactorKind,
 	transactor: &T::AccountId,
 	dest: &T::AccountId,
 	value: BalanceOf<T>,
-	ctx: &mut ExecutionContext<'a, T, V, L>,
+	ctx: &mut ExecutionContext<'a, T, L>,
 ) -> DispatchResult
 where
 	T::AccountId: UncheckedFrom<T::Hash> + AsRef<[u8]>,
@@ -493,20 +483,19 @@ where
 /// implies that the control won't be returned to the contract anymore, but there is still some code
 /// on the path of the return from that call context. Therefore, care must be taken in these
 /// situations.
-struct CallContext<'a, 'b: 'a, T: Config + 'b, V: Vm<T> + 'b, L: Loader<T>> {
-	ctx: &'a mut ExecutionContext<'b, T, V, L>,
+struct CallContext<'a, 'b: 'a, T: Config + 'b, L: Loader<T>> {
+	ctx: &'a mut ExecutionContext<'b, T, L>,
 	caller: T::AccountId,
 	value_transferred: BalanceOf<T>,
 	timestamp: MomentOf<T>,
 	block_number: T::BlockNumber,
 }
 
-impl<'a, 'b: 'a, T, E, V, L> Ext for CallContext<'a, 'b, T, V, L>
+impl<'a, 'b: 'a, T, L> Ext for CallContext<'a, 'b, T, L>
 where
 	T: Config + 'b,
 	T::AccountId: UncheckedFrom<T::Hash> + AsRef<[u8]>,
-	V: Vm<T, Executable = E>,
-	L: Loader<T, Executable = E>,
+	L: Loader<T>,
 {
 	type T = T;
 
