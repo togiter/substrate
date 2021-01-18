@@ -418,7 +418,25 @@ fn get_memory_limits<T: Config>(module: Option<&MemoryType>, schedule: &Schedule
 /// - all imported functions from the external environment matches defined by `env` module,
 ///
 /// The preprocessing includes injecting code for gas metering and metering the height of stack.
-pub fn prepare_contract<C: ImportSatisfyCheck, T: Config>(
+pub fn prepare_contract<T: Config>(
+	original_code: Vec<u8>,
+	schedule: &Schedule<T>,
+) -> Result<PrefabWasmModule<T>, &'static str> {
+	do_preparation::<super::runtime::Env, T>(original_code, schedule)
+}
+
+/// Loads the given module given in `original_code`, performs some checks on it and
+/// does some preprocessing.
+///
+/// The checks are:
+///
+/// - provided code is a valid wasm module.
+/// - the module doesn't define an internal memory instance,
+/// - imported memory (if any) doesn't reserve more memory than permitted by the `schedule`,
+/// - all imported functions from the external environment matches defined by `env` module,
+///
+/// The preprocessing includes injecting code for gas metering and metering the height of stack.
+fn do_preparation<C: ImportSatisfyCheck, T: Config>(
 	original_code: Vec<u8>,
 	schedule: &Schedule<T>,
 ) -> Result<PrefabWasmModule<T>, &'static str> {
@@ -453,6 +471,7 @@ pub fn prepare_contract<C: ImportSatisfyCheck, T: Config>(
 		original_code: Some(original_code),
 	})
 }
+
 
 /// Alternate (possibly unsafe) preparation functions used only for benchmarking.
 ///

@@ -27,7 +27,7 @@
 //! this guarantees that every instrumented contract code in cache cannot have the version equal to the current one.
 //! Thus, before executing a contract it should be reinstrument with new schedule.
 
-use crate::wasm::{prepare, runtime::Env, PrefabWasmModule};
+use crate::wasm::{prepare, PrefabWasmModule};
 use crate::{CodeHash, CodeStorage, PristineCode, Schedule, Config};
 use sp_std::prelude::*;
 use sp_core::crypto::UncheckedFrom;
@@ -94,7 +94,7 @@ pub fn load<T: Config>(
 		// We need to re-instrument the code with the latest schedule here.
 		let original_code =
 			<PristineCode<T>>::get(code_hash).ok_or_else(|| "pristine code is not found")?;
-		prefab_module = prepare::prepare_contract::<Env, T>(original_code, schedule)?;
+		prefab_module = prepare::prepare_contract::<T>(original_code, schedule)?;
 		<CodeStorage<T>>::insert(&code_hash, &prefab_module);
 	}
 	prefab_module.code_hash = code_hash;
