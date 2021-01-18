@@ -27,23 +27,26 @@
 //! this guarantees that every instrumented contract code in cache cannot have the version equal to the current one.
 //! Thus, before executing a contract it should be reinstrument with new schedule.
 
-use crate::wasm::{prepare, PrefabWasmModule};
-use crate::{CodeHash, CodeStorage, PristineCode, Schedule, Config};
-use sp_std::prelude::*;
+use crate::{
+	CodeHash, CodeStorage, PristineCode, Schedule, Config, Error,
+	wasm::{prepare, PrefabWasmModule},
+};
 use sp_core::crypto::UncheckedFrom;
-use frame_support::StorageMap;
+use frame_support::{StorageMap, dispatch::DispatchError};
 
 /// Put the instrumented module in storage.
 ///
 /// Increments the refcount of the in-storage `prefab_module` if it already exists in storage
 /// under the specified `code_hash`.
-pub fn store<T: Config>(
-	prefab_module: PrefabWasmModule<T>,
-	original_code: Vec<u8>,
-	code_hash: &CodeHash<T>,
-) where T::AccountId: UncheckedFrom<T::Hash> + AsRef<[u8]> {
-	<PristineCode<T>>::insert(code_hash, original_code);
-	<CodeStorage<T>>::mutate(code_hash, |existing| {
+pub fn store<T: Config>(mut prefab_module: PrefabWasmModule<T>) -> CodeHash<T>
+where
+	T::AccountId: UncheckedFrom<T::Hash> + AsRef<[u8]>
+{
+	let code_hash = sp_std::mem::take(&mut prefab_module.code_hash);
+	if let Some(code) = prefab_module.original_code.take() {
+		<PristineCode<T>>::insert(&code_hash, code);
+	}
+	<CodeStorage<T>>::mutate(&code_hash, |existing| {
 		match existing {
 			// TODO: verify this statement
 			// When hitting this overflow we would already have paniced because
@@ -52,6 +55,7 @@ pub fn store<T: Config>(
 			None => *existing = Some(prefab_module),
 		}
 	});
+	code_hash
 }
 
 /// Prepare and save the code to storage in one go.
@@ -83,17 +87,20 @@ pub fn prepare_and_store_unchecked<T: Config>(
 pub fn load<T: Config>(
 	code_hash: CodeHash<T>,
 	schedule: &Schedule<T>,
-) -> Result<PrefabWasmModule<T>, &'static str> where T::AccountId: UncheckedFrom<T::Hash> + AsRef<[u8]> {
-	let mut prefab_module =
-		<CodeStorage<T>>::get(code_hash).ok_or_else(|| "code is not found")?;
+) -> Result<PrefabWasmModule<T>, DispatchError>
+where
+	T::AccountId: UncheckedFrom<T::Hash> + AsRef<[u8]>
+{
+	let mut prefab_module = <CodeStorage<T>>::get(code_hash)
+		.ok_or_else(|| Error::<T>::CodeNotFound)?;
 
 	if prefab_module.schedule_version < schedule.version {
 		// The current schedule version is greater than the version of the one cached
 		// in the storage.
 		//
 		// We need to re-instrument the code with the latest schedule here.
-		let original_code =
-			<PristineCode<T>>::get(code_hash).ok_or_else(|| "pristine code is not found")?;
+		let original_code = <PristineCode<T>>::get(code_hash)
+			.ok_or_else(|| Error::<T>::CodeNotFound)?;
 		prefab_module = prepare::prepare_contract::<T>(original_code, schedule)?;
 		<CodeStorage<T>>::insert(&code_hash, &prefab_module);
 	}

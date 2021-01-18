@@ -18,6 +18,12 @@
 //! This module provides a means for executing contracts
 //! represented in wasm.
 
+#[macro_use]
+mod env_def;
+mod code_cache;
+mod prepare;
+mod runtime;
+
 use crate::{
 	CodeHash, Schedule, Config,
 	wasm::env_def::FunctionImplProvider,
@@ -27,18 +33,11 @@ use crate::{
 use sp_std::prelude::*;
 use sp_core::crypto::UncheckedFrom;
 use codec::{Encode, Decode};
-
-#[macro_use]
-mod env_def;
-mod code_cache;
-mod prepare;
-mod runtime;
-
+use frame_support::dispatch::DispatchError;
 use self::code_cache::load as load_code;
 use pallet_contracts_primitives::ExecResult;
 
 pub use self::{
-	code_cache::store as store_code,
 	prepare::prepare_contract,
 	runtime::{ReturnCode, Runtime, RuntimeToken},
 };
@@ -96,7 +95,7 @@ where
 {
 	type Executable = WasmExecutable<'a, T>;
 
-	fn load_init(&self, code_hash: CodeHash<T>) -> Result<WasmExecutable<'a, T>, &'static str> {
+	fn load_init(&self, code_hash: CodeHash<T>) -> Result<WasmExecutable<'a, T>, DispatchError> {
 		let prefab_module = load_code::<T>(code_hash, self.schedule)?;
 		Ok(WasmExecutable {
 			entrypoint_name: "deploy",
@@ -104,7 +103,7 @@ where
 			schedule: self.schedule,
 		})
 	}
-	fn load_main(&self, code_hash: CodeHash<T>) -> Result<WasmExecutable<'a, T>, &'static str> {
+	fn load_main(&self, code_hash: CodeHash<T>) -> Result<WasmExecutable<'a, T>, DispatchError> {
 		let prefab_module = load_code::<T>(code_hash, self.schedule)?;
 		Ok(WasmExecutable {
 			entrypoint_name: "call",
@@ -174,6 +173,10 @@ where
 
 	fn code_hash(&self) -> &CodeHash<T> {
 		&self.prefab_module.code_hash
+	}
+
+	fn store(self) -> CodeHash<T> {
+		code_cache::store(self.prefab_module)
 	}
 }
 

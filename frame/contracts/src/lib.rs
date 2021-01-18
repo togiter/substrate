@@ -103,7 +103,7 @@ pub use crate::{
 	schedule::{Schedule, HostFnWeights, InstructionWeights, Limits},
 };
 use crate::{
-	exec::ExecutionContext,
+	exec::{ExecutionContext, Loader},
 	wasm::WasmLoader,
 	rent::Rent,
 	storage::Storage,
@@ -591,7 +591,6 @@ decl_module! {
 			let mut gas_meter = GasMeter::new(gas_limit);
 			let prefab_module = wasm::prepare_contract::<T>(code, &schedule)?;
 			let result = Self::execute_wasm(origin, &mut gas_meter, |ctx, gas_meter| {
-				use crate::exec::Loader;
 				let executable = ctx.loader.get_init(prefab_module);
 				ctx.instantiate(endowment, gas_meter, &executable, data, &salt)
 					.map(|(_address, output)| output)
@@ -626,9 +625,7 @@ decl_module! {
 			let origin = ensure_signed(origin)?;
 			let mut gas_meter = GasMeter::new(gas_limit);
 			let result = Self::execute_wasm(origin, &mut gas_meter, |ctx, gas_meter| {
-				use crate::exec::Loader;
-				let executable = ctx.loader.load_init(code_hash)
-					.map_err(|_| Error::<T>::CodeNotFound)?;
+				let executable = ctx.loader.load_init(code_hash)?;
 				ctx.instantiate(endowment, gas_meter, &executable, data, &salt)
 					.map(|(_address, output)| output)
 			});

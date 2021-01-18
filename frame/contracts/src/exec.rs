@@ -24,7 +24,7 @@ use sp_core::crypto::UncheckedFrom;
 use sp_std::prelude::*;
 use sp_runtime::traits::{Bounded, Zero, Convert, Saturating};
 use frame_support::{
-	dispatch::DispatchResult,
+	dispatch::{DispatchResult, DispatchError},
 	traits::{ExistenceRequirement, Currency, Time, Randomness},
 	weights::Weight,
 	ensure, StorageMap,
@@ -177,10 +177,10 @@ pub trait Loader<T: Config> {
 
 	/// Load the initializer portion of the code specified by the `code_hash`. This
 	/// executable is called upon instantiation.
-	fn load_init(&self, code_hash: CodeHash<T>) -> Result<Self::Executable, &'static str>;
+	fn load_init(&self, code_hash: CodeHash<T>) -> Result<Self::Executable, DispatchError>;
 	/// Load the main portion of the code specified by the `code_hash`. This executable
 	/// is called for each call to a contract.
-	fn load_main(&self, code_hash: CodeHash<T>) -> Result<Self::Executable, &'static str>;
+	fn load_main(&self, code_hash: CodeHash<T>) -> Result<Self::Executable, DispatchError>;
 
 	fn get_init(&self, module: <Self::Executable as Executable<T>>::Module) -> Self::Executable;
 }
@@ -204,6 +204,8 @@ pub trait Executable<T: Config>: Sized {
 	) -> ExecResult;
 
 	fn code_hash(&self) -> &CodeHash<T>;
+
+	fn store(self) -> CodeHash<T>;
 }
 
 pub struct ExecutionContext<'a, T: Config + 'a, L> {
@@ -293,8 +295,7 @@ where
 				)?
 			}
 
-			let executable = nested.loader.load_main(contract.code_hash)
-				.map_err(|_| Error::<T>::CodeNotFound)?;
+			let executable = nested.loader.load_main(contract.code_hash)?;
 			let output = executable.execute(
 				nested.new_call_context(caller, value),
 				input_data,
@@ -536,8 +537,7 @@ where
 		input_data: Vec<u8>,
 		salt: &[u8],
 	) -> Result<(AccountIdOf<T>, ExecReturnValue), ExecError> {
-		let executable = self.ctx.loader.load_init(code_hash.clone())
-			.map_err(|_| Error::<T>::CodeNotFound)?;
+		let executable = self.ctx.loader.load_init(code_hash.clone())?;
 		self.ctx.instantiate(endowment, gas_meter, &executable, input_data, salt)
 	}
 
