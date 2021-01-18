@@ -113,7 +113,7 @@ where
 	}
 	fn get_init(&self, module: PrefabWasmModule<T>) -> Self::Executable {
 		WasmExecutable {
-			entrypoint_name: "init",
+			entrypoint_name: "deploy",
 			prefab_module: module,
 			schedule: self.schedule,
 		}

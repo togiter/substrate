@@ -545,7 +545,7 @@ mod tests {
 					},
 					.. Default::default()
 				};
-				let r = prepare_contract::<crate::tests::Test>(wasm, &schedule);
+				let r = do_preparation::<env::Test, crate::tests::Test>(wasm, &schedule);
 				assert_matches!(r, $($expected)*);
 			}
 		};

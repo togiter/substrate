@@ -753,11 +753,11 @@ mod tests {
 	}
 
 	#[derive(Clone)]
-	struct MockExecutable<'a>(Rc<dyn Fn(MockCtx) -> ExecResult + 'a>);
+	struct MockExecutable<'a>(Rc<dyn Fn(MockCtx) -> ExecResult + 'a>, CodeHash<Test>);
 
 	impl<'a> MockExecutable<'a> {
-		fn new(f: impl Fn(MockCtx) -> ExecResult + 'a) -> Self {
-			MockExecutable(Rc::new(f))
+		fn new(hash: CodeHash<Test>, f: impl Fn(MockCtx) -> ExecResult + 'a) -> Self {
+			MockExecutable(Rc::new(f), hash)
 		}
 	}
 
@@ -779,7 +779,7 @@ mod tests {
 			let code_hash = <Test as frame_system::Config>::Hash::from_low_u64_be(self.counter);
 
 			self.counter += 1;
-			self.map.insert(code_hash, MockExecutable::new(f));
+			self.map.insert(code_hash, MockExecutable::new(code_hash.clone(), f));
 			code_hash
 		}
 	}
@@ -799,7 +799,7 @@ mod tests {
 				.cloned()
 				.ok_or_else(|| Error::<Test>::CodeNotFound.into())
 		}
-		fn get_init(&self, module: ()) -> Self::Executable {
+		fn get_init(&self, _module: ()) -> Self::Executable {
 			unimplemented!()
 		}
 	}
@@ -821,11 +821,11 @@ mod tests {
 		}
 
 		fn code_hash(&self) -> &CodeHash<Test> {
-			unimplemented!()
+			&self.1
 		}
 
 		fn store(self) -> CodeHash<Test> {
-			unimplemented!()
+			self.1
 		}
 	}
 
