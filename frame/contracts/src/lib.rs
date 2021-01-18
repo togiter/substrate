@@ -103,7 +103,7 @@ pub use crate::{
 	schedule::{Schedule, HostFnWeights, InstructionWeights, Limits},
 };
 use crate::{
-	exec::{ExecutionContext, Loader},
+	exec::{ExecutionContext, Loader, Executable},
 	wasm::WasmLoader,
 	rent::Rent,
 	storage::Storage,
@@ -592,14 +592,13 @@ decl_module! {
 			let prefab_module = wasm::prepare_contract::<T>(code, &schedule)?;
 			let result = Self::execute_wasm(origin, &mut gas_meter, |ctx, gas_meter| {
 				let executable = ctx.loader.get_init(prefab_module);
-				ctx.instantiate(endowment, gas_meter, &executable, data, &salt)
-					.map(|(_address, output)| output)
+				let result = ctx.instantiate(endowment, gas_meter, &executable, data, &salt)
+					.map(|(_address, output)| output);
+				if result.is_ok() {
+					Self::deposit_event(RawEvent::CodeStored(executable.store()))
+				}
+				result
 			});
-			/*
-			if let Ok(_) = &result {
-				Self::deposit_event(RawEvent::CodeStored(prefab_module.));
-			}
-			*/
 			gas_meter.into_dispatch_result(result)
 		}
 
@@ -626,9 +625,15 @@ decl_module! {
 			let mut gas_meter = GasMeter::new(gas_limit);
 			let result = Self::execute_wasm(origin, &mut gas_meter, |ctx, gas_meter| {
 				let executable = ctx.loader.load_init(code_hash)?;
-				ctx.instantiate(endowment, gas_meter, &executable, data, &salt)
-					.map(|(_address, output)| output)
+				let result = ctx.instantiate(endowment, gas_meter, &executable, data, &salt)
+					.map(|(_address, output)| output);
+				if result.is_ok() {
+					// increment refcount
+					executable.store();
+				}
+				result
 			});
+
 			gas_meter.into_dispatch_result(result)
 		}
 

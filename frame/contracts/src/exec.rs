@@ -538,7 +538,12 @@ where
 		salt: &[u8],
 	) -> Result<(AccountIdOf<T>, ExecReturnValue), ExecError> {
 		let executable = self.ctx.loader.load_init(code_hash.clone())?;
-		self.ctx.instantiate(endowment, gas_meter, &executable, input_data, salt)
+		let result = self.ctx.instantiate(endowment, gas_meter, &executable, input_data, salt);
+		// increment refcounter
+		if result.is_ok() {
+			executable.store();
+		}
+		result
 	}
 
 	fn transfer(
